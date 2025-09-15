@@ -1,0 +1,18 @@
+[
+    {
+        "merged": "com.mcpserver.android.mcp-server-merged_res-7:/drawable/notification_bg.xml",
+        "source": "com.mcpserver.android.mcp-server-core-1.12.0-1:/drawable/notification_bg.xml"
+    },
+    {
+        "merged": "com.mcpserver.android.mcp-server-merged_res-7:/drawable/notification_icon_background.xml",
+        "source": "com.mcpserver.android.mcp-server-core-1.12.0-1:/drawable/notification_icon_background.xml"
+    },
+    {
+        "merged": "com.mcpserver.android.mcp-server-merged_res-7:/drawable/notification_tile_bg.xml",
+        "source": "com.mcpserver.android.mcp-server-core-1.12.0-1:/drawable/notification_tile_bg.xml"
+    },
+    {
+        "merged": "com.mcpserver.android.mcp-server-merged_res-7:/drawable/notification_bg_low.xml",
+        "source": "com.mcpserver.android.mcp-server-core-1.12.0-1:/drawable/notification_bg_low.xml"
+    }
+]
