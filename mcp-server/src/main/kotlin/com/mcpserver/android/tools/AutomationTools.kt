@@ -24,14 +24,19 @@ class AutomationTools {
     /**
      * Execute a tool by name with provided arguments
      */
-    suspend fun executeTool(request: CallToolRequest): CallToolResponse {
+    suspend fun executeTool(params: CallToolParams): CallToolResult {
         return try {
-            when (request.name) {
-                "tapButton" -> executeTapButton(request.arguments)
-                "inputText" -> executeInputText(request.arguments)
-                "getScreenInfo" -> executeGetScreenInfo(request.arguments)
-                "scroll" -> executeScroll(request.arguments)
-                else -> createErrorResponse("Tool '${request.name}' not found")
+            val arguments = params.arguments?.let {
+                if (it.toString() == "null") emptyMap() else
+                Json.decodeFromJsonElement<Map<String, JsonElement>>(it)
+            } ?: emptyMap()
+
+            when (params.name) {
+                "tapButton" -> executeTapButton(arguments)
+                "inputText" -> executeInputText(arguments)
+                "getScreenInfo" -> executeGetScreenInfo(arguments)
+                "scroll" -> executeScroll(arguments)
+                else -> createErrorResponse("Tool '${params.name}' not found")
             }
         } catch (e: Exception) {
             createErrorResponse("Tool execution failed: ${e.message}")
@@ -66,7 +71,7 @@ class AutomationTools {
         )
     }
 
-    private suspend fun executeTapButton(arguments: Map<String, JsonElement>): CallToolResponse {
+    private suspend fun executeTapButton(arguments: Map<String, JsonElement>): CallToolResult {
         val text = arguments["text"]?.jsonPrimitive?.content
         val resourceId = arguments["resourceId"]?.jsonPrimitive?.content
         val timeout = arguments["timeout"]?.jsonPrimitive?.long ?: 5000
@@ -81,7 +86,7 @@ class AutomationTools {
         // Simulate tool execution delay
         kotlinx.coroutines.delay(100)
 
-        return CallToolResponse(
+        return CallToolResult(
             content = listOf(
                 ToolContent(
                     type = "text",
@@ -123,7 +128,7 @@ class AutomationTools {
         )
     }
 
-    private suspend fun executeInputText(arguments: Map<String, JsonElement>): CallToolResponse {
+    private suspend fun executeInputText(arguments: Map<String, JsonElement>): CallToolResult {
         val text = arguments["text"]?.jsonPrimitive?.content
             ?: return createErrorResponse("'text' parameter is required")
 
@@ -141,7 +146,7 @@ class AutomationTools {
         kotlinx.coroutines.delay(50)
 
         val action = if (clearFirst) "cleared and entered" else "appended"
-        return CallToolResponse(
+        return CallToolResult(
             content = listOf(
                 ToolContent(
                     type = "text",
@@ -176,7 +181,7 @@ class AutomationTools {
         )
     }
 
-    private suspend fun executeGetScreenInfo(arguments: Map<String, JsonElement>): CallToolResponse {
+    private suspend fun executeGetScreenInfo(arguments: Map<String, JsonElement>): CallToolResult {
         val includeInvisible = arguments["includeInvisible"]?.jsonPrimitive?.boolean ?: false
         val maxDepth = arguments["maxDepth"]?.jsonPrimitive?.int ?: 10
 
@@ -195,7 +200,7 @@ class AutomationTools {
             appendLine("- Current activity: com.example.MainActivity")
         }
 
-        return CallToolResponse(
+        return CallToolResult(
             content = listOf(
                 ToolContent(
                     type = "text",
@@ -235,7 +240,7 @@ class AutomationTools {
         )
     }
 
-    private suspend fun executeScroll(arguments: Map<String, JsonElement>): CallToolResponse {
+    private suspend fun executeScroll(arguments: Map<String, JsonElement>): CallToolResult {
         val direction = arguments["direction"]?.jsonPrimitive?.content
             ?: return createErrorResponse("'direction' parameter is required")
 
@@ -250,7 +255,7 @@ class AutomationTools {
         kotlinx.coroutines.delay(100)
 
         val target = containerId?.let { "container '$it'" } ?: "main screen"
-        return CallToolResponse(
+        return CallToolResult(
             content = listOf(
                 ToolContent(
                     type = "text",
@@ -263,8 +268,8 @@ class AutomationTools {
     /**
      * Helper function to create error responses
      */
-    private fun createErrorResponse(message: String): CallToolResponse {
-        return CallToolResponse(
+    private fun createErrorResponse(message: String): CallToolResult {
+        return CallToolResult(
             content = listOf(
                 ToolContent(
                     type = "text",

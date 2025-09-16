@@ -15,6 +15,9 @@ import io.ktor.server.routing.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
 import android.util.Log
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 
 /**
  * Ktor-based HTTP server that implements MCP (Model Context Protocol) endpoints.
@@ -125,59 +128,141 @@ class McpHttpServer(
     }
 
     /**
-     * Configure MCP protocol routes
+     * Configure MCP JSON-RPC 2.0 protocol routes
      */
     private fun Routing.configureMcpRoutes() {
-        route("/") {
-            /**
-             * GET /list_tools - Returns all available automation tools
-             * This endpoint follows MCP specification for tool discovery
-             */
-            get("list_tools") {
-                try {
-                    Log.d(TAG, "Handling list_tools request")
+        /**
+         * POST / - Main JSON-RPC 2.0 endpoint for all MCP methods
+         */
+        post("/") {
+            try {
+                val jsonRpcRequest = call.receive<JsonRpcRequest>()
+                Log.d(TAG, "Handling JSON-RPC method: ${jsonRpcRequest.method}")
 
-                    val response = ListToolsResponse(
-                        tools = automationTools.availableTools
+                val response = when (jsonRpcRequest.method) {
+                    "initialize" -> handleInitialize(jsonRpcRequest)
+                    "tools/list" -> handleToolsList(jsonRpcRequest)
+                    "tools/call" -> handleToolsCall(jsonRpcRequest)
+                    else -> createErrorResponse(
+                        jsonRpcRequest.id,
+                        JsonRpcErrorCodes.METHOD_NOT_FOUND,
+                        "Method '${jsonRpcRequest.method}' not found"
                     )
-
-                    call.respond(HttpStatusCode.OK, response)
-                    Log.d(TAG, "Successfully returned ${response.tools.size} tools")
-
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error handling list_tools request", e)
-                    handleServerError(call, e)
                 }
-            }
 
-            /**
-             * POST /call_tool - Execute a specific tool with parameters
-             * This endpoint follows MCP specification for tool invocation
-             */
-            post("call_tool") {
-                try {
-                    Log.d(TAG, "Handling call_tool request")
+                call.respond(HttpStatusCode.OK, response)
+                Log.d(TAG, "JSON-RPC method completed: ${jsonRpcRequest.method}")
 
-                    val request = call.receive<CallToolRequest>()
-                    Log.d(TAG, "Calling tool: ${request.name} with args: ${request.arguments}")
-
-                    val response = automationTools.executeTool(request)
-
-                    val statusCode = if (response.isError) {
-                        HttpStatusCode.BadRequest
-                    } else {
-                        HttpStatusCode.OK
-                    }
-
-                    call.respond(statusCode, response)
-                    Log.d(TAG, "Tool execution completed: ${request.name}")
-
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error handling call_tool request", e)
-                    handleServerError(call, e)
-                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error handling JSON-RPC request", e)
+                val errorResponse = createErrorResponse(
+                    null,
+                    JsonRpcErrorCodes.INTERNAL_ERROR,
+                    "Internal server error: ${e.message}"
+                )
+                call.respond(HttpStatusCode.InternalServerError, errorResponse)
             }
         }
+    }
+
+    /**
+     * Handle initialize method for capability negotiation
+     */
+    private fun handleInitialize(request: JsonRpcRequest): JsonRpcResponse {
+        Log.d(TAG, "Handling initialize request")
+
+        val result = InitializeResult(
+            protocolVersion = "2024-11-05",
+            capabilities = ServerCapabilities(
+                tools = ToolsCapability(listChanged = false)
+            ),
+            serverInfo = ServerInfo(
+                name = "Android MCP Server",
+                title = "MCP server for android related work",
+                version = "1.0.0"
+            ),
+            instructions = "This contains any instruction that should be followed by an mcp client."
+        )
+
+        return JsonRpcResponse(
+            result = Json.encodeToJsonElement(result),
+            id = request.id
+        )
+    }
+
+    /**
+     * Handle tools/list method
+     */
+    private fun handleToolsList(request: JsonRpcRequest): JsonRpcResponse {
+        Log.d(TAG, "Handling tools/list request")
+
+        return try {
+            // Parse optional params for cursor-based pagination
+            request.params?.let {
+                Json.decodeFromJsonElement<ListToolsParams>(it)
+            }
+
+            val result = ListToolsResult(
+                tools = automationTools.availableTools,
+                nextCursor = null // No pagination support for now
+            )
+
+            Log.d(TAG, "Successfully returned ${result.tools.size} tools")
+
+            JsonRpcResponse(
+                result = Json.encodeToJsonElement(result),
+                id = request.id
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in tools/list", e)
+            createErrorResponse(request.id, JsonRpcErrorCodes.INTERNAL_ERROR, e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Handle tools/call method
+     */
+    private suspend fun handleToolsCall(request: JsonRpcRequest): JsonRpcResponse {
+        Log.d(TAG, "Handling tools/call request")
+
+        return try {
+            val params = request.params?.let {
+                Json.decodeFromJsonElement<CallToolParams>(it)
+            } ?: throw IllegalArgumentException("Missing parameters for tools/call")
+
+            Log.d(TAG, "Calling tool: ${params.name}")
+
+            val result = automationTools.executeTool(params)
+
+            if (result.isError) {
+                createErrorResponse(
+                    request.id,
+                    JsonRpcErrorCodes.TOOL_EXECUTION_ERROR,
+                    result.content.firstOrNull()?.text ?: "Tool execution failed"
+                )
+            } else {
+                JsonRpcResponse(
+                    result = Json.encodeToJsonElement(result),
+                    id = request.id
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in tools/call", e)
+            createErrorResponse(request.id, JsonRpcErrorCodes.INTERNAL_ERROR, e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Create a JSON-RPC error response
+     */
+    private fun createErrorResponse(id: JsonElement?, code: Int, message: String): JsonRpcResponse {
+        return JsonRpcResponse(
+            error = JsonRpcError(
+                code = code,
+                message = message
+            ),
+            id = id
+        )
     }
 
     /**
@@ -211,28 +296,13 @@ class McpHttpServer(
                     "version" to "1.0.0",
                     "description" to "Embedded MCP server for Android automation",
                     "endpoints" to mapOf(
-                        "list_tools" to "GET /list_tools - List all available automation tools",
-                        "call_tool" to "POST /call_tool - Execute a tool with parameters",
+                        "jsonrpc" to "POST / - Main JSON-RPC 2.0 endpoint for all MCP methods",
                         "health" to "GET /health - Server health check"
                     ),
-                    "documentation" to "https://spec.modelcontextprotocol.io/specification/"
+                    "documentation" to "https://modelcontextprotocol.io/specification/"
                 )
             )
         }
     }
 
-    /**
-     * Handle server errors with proper MCP error response format
-     */
-    private suspend fun handleServerError(call: ApplicationCall, exception: Exception) {
-        val errorResponse = McpErrorResponse(
-            error = McpError(
-                code = McpErrorCodes.INTERNAL_ERROR,
-                message = "Internal server error: ${exception.message}",
-                data = null
-            )
-        )
-
-        call.respond(HttpStatusCode.InternalServerError, errorResponse)
-    }
 }

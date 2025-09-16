@@ -19,22 +19,24 @@ This is an Android library project that provides an embedded MCP (Model Context 
 
 - **Main API**: `EmbeddedMcpServer` object provides simple start(port)/stop() interface
 - **HTTP Server**: Uses Ktor CIO engine, binds to localhost only for security
-- **MCP Protocol**: Implements `/list_tools` (GET) and `/call_tool` (POST) endpoints
+- **MCP Protocol**: Implements JSON-RPC 2.0 with `initialize`, `tools/list`, and `tools/call` methods
 - **Tool System**: Pluggable automation tools with JSON schema validation
 - **Coroutines**: All server operations are async using Kotlin coroutines
 
 ## Key Components
 
 1. **MCP Models** (`model/McpModels.kt`):
-   - Protocol-compliant data classes for tool discovery and invocation
+   - JSON-RPC 2.0 compliant data classes for MCP protocol
+   - Tool discovery and invocation models
+   - Capability negotiation and server initialization models
    - JSON schema definitions for parameter validation
-   - Error response models following JSON-RPC patterns
 
 2. **HTTP Server** (`server/McpHttpServer.kt`):
-   - Ktor-based server with JSON content negotiation
+   - Ktor-based server with JSON-RPC 2.0 support
+   - Single POST endpoint handling all MCP methods
    - CORS enabled for localhost clients
+   - Capability negotiation with `initialize` method
    - Health check and info endpoints
-   - Proper error handling with MCP error codes
 
 3. **Automation Tools** (`tools/AutomationTools.kt`):
    - Sample tools: tapButton, inputText, scroll, getScreenInfo
@@ -65,13 +67,23 @@ This is an Android library project that provides an embedded MCP (Model Context 
 ./gradlew :mcp-server:publishToMavenLocal
 ```
 
+### Clean Build
+```bash
+./gradlew clean
+```
+
 ## Dependencies
 
-- **Ktor**: HTTP server framework (CIO engine for Android)
-- **Kotlinx Serialization**: JSON handling for MCP protocol
-- **Coroutines**: Async operations
-- **Android Core KTX**: Android utilities
-- **Logback**: Logging framework
+The library uses `api` configuration to expose key dependencies automatically to consuming apps:
+
+- **Ktor**: HTTP server framework (CIO engine for Android) - version 2.3.4
+  - `ktor-server-core`, `ktor-server-cio`, `ktor-server-content-negotiation`
+  - `ktor-serialization-kotlinx-json`, `ktor-server-cors`
+- **Kotlinx Serialization**: JSON handling for MCP protocol - version 1.6.0
+- **Kotlinx Coroutines**: Async operations - version 1.7.3
+- **Android Core KTX**: Android utilities - version 1.12.0 (implementation only)
+
+All Ktor and serialization dependencies are exposed as `api` dependencies, meaning they are automatically available to consuming applications without manual declaration.
 
 ## Testing Strategy
 
@@ -97,12 +109,70 @@ EmbeddedMcpServer.start(port = 12345)
 // Get URL for AI agent
 val serverUrl = EmbeddedMcpServer.getServerUrl() // "http://127.0.0.1:12345"
 
-// AI agent can now call:
-// GET /list_tools - discover available tools
-// POST /call_tool - execute tools with parameters
+// AI agent can now call JSON-RPC 2.0 methods:
+// POST / with method "initialize" - capability negotiation
+// POST / with method "tools/list" - discover available tools
+// POST / with method "tools/call" - execute tools with parameters
 
 // Stop when done
 EmbeddedMcpServer.stop()
+```
+
+## MCP JSON-RPC 2.0 Protocol
+
+The server now implements the official MCP specification using JSON-RPC 2.0:
+
+### Initialize Method
+```json
+POST /
+{
+  "jsonrpc": "2.0",
+  "method": "initialize",
+  "id": 1
+}
+```
+
+Response:
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {
+      "tools": { "listChanged": false }
+    },
+    "serverInfo": {
+      "name": "Android MCP Server",
+      "version": "1.0.0"
+    }
+  },
+  "id": 1
+}
+```
+
+### List Tools Method
+```json
+POST /
+{
+  "jsonrpc": "2.0",
+  "method": "tools/list",
+  "params": { "cursor": "optional-cursor" },
+  "id": 2
+}
+```
+
+### Call Tool Method
+```json
+POST /
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "tapButton",
+    "arguments": { "text": "Login" }
+  },
+  "id": 3
+}
 ```
 
 ## Extension Points
@@ -111,3 +181,4 @@ EmbeddedMcpServer.stop()
 - Extend MCP models for additional protocol features
 - Add authentication/authorization middleware to Ktor server
 - Implement real UI automation using Android Accessibility Services
+- Add pagination support for tool listing
